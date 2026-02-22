@@ -20,9 +20,15 @@
           buildInputs = [
             zig
             pkgs.hyperfine
-            pkgs.sdl3
             pkgs.pkg-config
           ];
+          # DVUI vendors SDL3 and builds it from source using Zig's C compiler.
+          # Nix's NIX_CFLAGS_COMPILE interferes with Zig's sysroot detection,
+          # causing framework search to fail. We unset the problematic vars
+          # so Zig can find macOS frameworks via its native sysroot logic.
+          shellHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+            unset NIX_CFLAGS_COMPILE NIX_LDFLAGS
+          '';
         };
       }
     );

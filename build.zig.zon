@@ -1,0 +1,16 @@
+.{
+    .name = .systat,
+    .version = "0.1.0",
+    .fingerprint = 0xc94a7c4f5cf5aafb,
+    .paths = .{""},
+    .dependencies = .{
+        .dvui = .{
+            .url = "git+https://github.com/david-vanderson/dvui?ref=main#2b6dfe7fd7a10a3d074f087bea4b709ed015f259",
+            .hash = "dvui-0.4.0-dev-AQFJmaQl2wDj-nR5BEX6yrkNF_HPN4JMK2FfhASDB-fD",
+        },
+        .toml = .{
+            .url = "git+https://github.com/sam701/zig-toml#cf50bd59c6276fb2b6d34b8d71d35486eecc719c",
+            .hash = "toml-0.3.0-bV14Bd-EAQBKoXhpYft303BtA2vgLNlxntUCIWgRUl46",
+        },
+    },
+}
