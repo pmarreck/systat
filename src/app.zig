@@ -59,4 +59,8 @@ comptime {
     _ = @import("data.zig");
     _ = @import("platform/stats.zig");
     _ = @import("platform/mock.zig");
+    _ = @import("modules/cpu_hogs.zig");
+    _ = @import("modules/mem_hogs.zig");
+    _ = @import("modules/cpu_graph.zig");
+    _ = @import("modules/ping_monitor.zig");
 }
