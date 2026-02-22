@@ -23,12 +23,19 @@ pub const PingMonitor = struct {
 	stats_iface: stats.SystemStats,
 	hosts: [MAX_HOSTS]?HostData,
 	host_count: usize,
+	ping_interval_ns: i128,
+	last_ping_ns: i128 = 0,
 
 	pub fn init(stats_iface: stats.SystemStats, hostnames: []const []const u8) PingMonitor {
+		return initWithInterval(stats_iface, hostnames, 2000);
+	}
+
+	pub fn initWithInterval(stats_iface: stats.SystemStats, hostnames: []const []const u8, interval_ms: u32) PingMonitor {
 		var self = PingMonitor{
 			.stats_iface = stats_iface,
 			.hosts = [_]?HostData{null} ** MAX_HOSTS,
 			.host_count = @min(hostnames.len, MAX_HOSTS),
+			.ping_interval_ns = @as(i128, interval_ms) * 1_000_000,
 		};
 		for (hostnames[0..self.host_count], 0..) |hostname, i| {
 			self.hosts[i] = .{
@@ -41,6 +48,11 @@ pub const PingMonitor = struct {
 	}
 
 	pub fn update(self: *PingMonitor) void {
+		// Rate-limit: only ping at the configured interval
+		const now = std.time.nanoTimestamp();
+		if (self.last_ping_ns != 0 and now - self.last_ping_ns < self.ping_interval_ns) return;
+		self.last_ping_ns = now;
+
 		for (self.hosts[0..self.host_count]) |*maybe_host| {
 			if (maybe_host.*) |*host_data| {
 				const result = self.stats_iface.ping(host_data.hostname);
@@ -63,7 +75,7 @@ pub const PingMonitor = struct {
 	const ping_module_info: ModuleInfo = .{
 		.id = "ping_monitor",
 		.display_name = "Ping Monitor",
-		.default_priority = 4,
+		.default_priority = 2,
 		.min_width = 300,
 		.min_height = 200,
 		.preferred_width = 500,
@@ -78,8 +90,72 @@ pub const PingMonitor = struct {
 		self.update();
 	}
 
-	pub fn moduleRender(_: *PingMonitor) void {
-		// no-op for now
+	pub fn moduleRender(self: *PingMonitor) void {
+		const dvui = @import("dvui");
+
+		dvui.label(@src(), "Web Ping \u{2014} {d} hosts", .{self.host_count}, .{
+			.font = dvui.themeGet().font_heading,
+		});
+
+		if (self.host_count == 0) {
+			dvui.label(@src(), "No hosts configured", .{}, .{});
+			return;
+		}
+
+		const Static = struct {
+			var y_axis: dvui.PlotWidget.Axis = .{
+				.name = "ms",
+				.min = 0,
+			};
+			var x_axis: dvui.PlotWidget.Axis = .{
+				.name = "Seconds Ago",
+			};
+		};
+
+		// Fixed sliding window: total seconds = HISTORY_SIZE * interval
+		const interval_sec: f32 = @floatCast(@as(f64, @floatFromInt(self.ping_interval_ns)) / 1_000_000_000.0);
+		const window_sec: f32 = @as(f32, @floatFromInt(HISTORY_SIZE)) * interval_sec;
+		Static.x_axis.min = -window_sec;
+		Static.x_axis.max = 0;
+
+		var plot = dvui.plot(@src(), .{
+			.x_axis = &Static.x_axis,
+			.y_axis = &Static.y_axis,
+		}, .{ .expand = .both, .min_size_content = .{ .h = 100 } });
+		defer plot.deinit();
+
+		// Per-host line colors cycle through theme accents
+		const line_colors = [_]dvui.Color{
+			dvui.themeGet().focus,
+			if (dvui.themeGet().highlight.fill) |c| c else dvui.Color.cyan,
+			if (dvui.themeGet().app1.fill) |c| c else dvui.Color.lime,
+			if (dvui.themeGet().app2.fill) |c| c else dvui.Color.yellow,
+			dvui.Color.fuchsia,
+			dvui.Color.aqua,
+			dvui.Color.red,
+			dvui.Color.silver,
+		};
+
+		for (0..self.host_count) |host_idx| {
+			if (self.hosts[host_idx]) |host_data| {
+				if (host_data.history.len() == 0) continue;
+
+				var line = plot.line();
+				defer line.deinit();
+
+				// Plot as "seconds ago": newest sample = 0, older = negative
+				const now_idx: i64 = if (host_data.sample_count > 0) @intCast(host_data.sample_count - 1) else 0;
+				for (0..host_data.history.len()) |i| {
+					const sample = host_data.history.get(i);
+					if (sample.latency_ms) |latency| {
+						const samples_ago: f64 = @floatFromInt(@as(i64, @intCast(sample.sample_index)) - now_idx);
+						const seconds_ago: f64 = samples_ago * @as(f64, @floatCast(interval_sec));
+						line.point(seconds_ago, latency);
+					}
+				}
+				line.stroke(1.5, line_colors[host_idx % line_colors.len]);
+			}
+		}
 	}
 
 	pub fn moduleDeinit(_: *PingMonitor) void {
@@ -169,6 +245,7 @@ test "per-host history independent" {
 	const iface = mock.interface();
 	const hostnames: [2][]const u8 = .{ "a.com", "b.com" };
 	var pm = PingMonitor.init(iface, &hostnames);
+	pm.ping_interval_ns = 0; // disable rate limiting for tests
 
 	pm.update();
 	pm.update();
@@ -217,7 +294,7 @@ test "moduleInfo returns correct id" {
 	const info = pm.moduleInfo();
 	try testing.expectEqualStrings("ping_monitor", info.id);
 	try testing.expectEqualStrings("Ping Monitor", info.display_name);
-	try testing.expectEqual(@as(u8, 4), info.default_priority);
+	try testing.expectEqual(@as(u8, 2), info.default_priority);
 	try testing.expectEqual(@as(u16, 300), info.min_width);
 	try testing.expectEqual(@as(u16, 200), info.min_height);
 	try testing.expectEqual(@as(u16, 500), info.preferred_width);
@@ -225,10 +302,12 @@ test "moduleInfo returns correct id" {
 }
 
 test "Module vtable dispatches correctly" {
+	const dvui = @import("dvui");
 	var mock = MockStats{};
 	const iface = mock.interface();
 	const hostnames: [1][]const u8 = .{"vtable.test"};
 	var pm = PingMonitor.init(iface, &hostnames);
+	pm.ping_interval_ns = 0; // disable rate limiting for tests
 	const m = pm.module();
 
 	// info() through vtable
@@ -240,7 +319,19 @@ test "Module vtable dispatches correctly" {
 	const hd = pm.getHostData(0).?;
 	try testing.expectEqual(@as(usize, 1), hd.history.len());
 
-	// render() and deinit() should not panic
-	m.render();
+	// render() needs DVUI context — test via frame
+	const RenderTest = struct {
+		var render_target: ?*PingMonitor = null;
+		fn frame() !dvui.App.Result {
+			if (render_target) |target| target.moduleRender();
+			return .ok;
+		}
+	};
+	RenderTest.render_target = &pm;
+	var t = try dvui.testing.init(.{});
+	defer t.deinit();
+	_ = try dvui.testing.step(RenderTest.frame);
+
+	// deinit() should not panic
 	m.deinit();
 }

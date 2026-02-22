@@ -7,6 +7,7 @@ pub const MockStats = struct {
 	processes: []const stats.ProcessInfo = &default_processes,
 	cpu: stats.CpuSnapshot = default_cpu,
 	mem: stats.MemSnapshot = default_mem,
+	summary: stats.SystemSummary = default_summary,
 	ping_latency_ms: ?f64 = 25.0,
 
 	// ── Default canned data ──────────────────────────────────────────
@@ -35,6 +36,28 @@ pub const MockStats = struct {
 		.free_bytes = 6 * 1024 * 1024 * 1024, //  6 GB
 	};
 
+	const default_summary: stats.SystemSummary = .{
+		.load_avg_1 = 3.50,
+		.load_avg_5 = 4.20,
+		.load_avg_15 = 5.10,
+		.processes_total = 350,
+		.processes_running = 3,
+		.processes_sleeping = 347,
+		.threads_total = 2500,
+		.wired_bytes = 4 * 1024 * 1024 * 1024, // 4 GB
+		.compressor_bytes = 2 * 1024 * 1024 * 1024, // 2 GB
+		.swap_ins = 12000,
+		.swap_outs = 8000,
+		.net_packets_in = 100_000_000,
+		.net_bytes_in = 50 * 1024 * 1024 * 1024, // 50 GB
+		.net_packets_out = 80_000_000,
+		.net_bytes_out = 20 * 1024 * 1024 * 1024, // 20 GB
+		.disk_reads = 500_000_000,
+		.disk_read_bytes = 2 * 1024 * 1024 * 1024 * 1024, // 2 TB
+		.disk_writes = 200_000_000,
+		.disk_write_bytes = 500 * 1024 * 1024 * 1024, // 500 GB
+	};
+
 	// ── Vtable thunks ────────────────────────────────────────────────
 
 	const gen = struct {
@@ -51,6 +74,11 @@ pub const MockStats = struct {
 		fn getMemSnapshot(ctx: *anyopaque) stats.MemSnapshot {
 			const self: *MockStats = @ptrCast(@alignCast(ctx));
 			return self.mem;
+		}
+
+		fn getSystemSummary(ctx: *anyopaque) stats.SystemSummary {
+			const self: *MockStats = @ptrCast(@alignCast(ctx));
+			return self.summary;
 		}
 
 		fn ping(ctx: *anyopaque, host: []const u8) stats.PingResult {
@@ -70,6 +98,7 @@ pub const MockStats = struct {
 			.getProcessListFn = &gen.getProcessList,
 			.getCpuSnapshotFn = &gen.getCpuSnapshot,
 			.getMemSnapshotFn = &gen.getMemSnapshot,
+			.getSystemSummaryFn = &gen.getSystemSummary,
 			.pingFn = &gen.ping,
 		};
 	}
@@ -100,6 +129,16 @@ test "getMemSnapshot returns used < total" {
 	const mem = iface.getMemSnapshot();
 
 	try std.testing.expect(mem.used_bytes < mem.total_bytes);
+}
+
+test "getSystemSummary returns mock data" {
+	var mock = MockStats{};
+	const iface = mock.interface();
+	const summary = iface.getSystemSummary();
+
+	try std.testing.expectApproxEqAbs(@as(f64, 3.50), summary.load_avg_1, 0.001);
+	try std.testing.expectEqual(@as(u32, 350), summary.processes_total);
+	try std.testing.expectEqual(@as(u64, 4 * 1024 * 1024 * 1024), summary.wired_bytes);
 }
 
 test "ping returns configured latency" {

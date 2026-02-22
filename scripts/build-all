@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Build systat release binaries and macOS .app bundle.
+# Usage: ./scripts/build-all [--debug]
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+OPTIMIZE="-Doptimize=ReleaseFast"
+BUILD_MODE="ReleaseFast"
+if [[ "${1:-}" == "--debug" ]]; then
+	OPTIMIZE=""
+	BUILD_MODE="Debug"
+fi
+
+DIST_DIR="dist"
+APP_NAME="systat"
+
+echo "=== Building $APP_NAME ($BUILD_MODE) ==="
+
+# Clean previous dist
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR"
+
+# Build native binary
+echo "Building native binary..."
+zig build compile $OPTIMIZE
+cp zig-out/bin/$APP_NAME "$DIST_DIR/$APP_NAME"
+echo "  -> $DIST_DIR/$APP_NAME"
+
+# Create macOS .app bundle (only on macOS)
+if [[ "$(uname)" == "Darwin" ]]; then
+	echo "Creating macOS .app bundle..."
+	APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
+	CONTENTS="$APP_BUNDLE/Contents"
+	MACOS="$CONTENTS/MacOS"
+	RESOURCES="$CONTENTS/Resources"
+
+	mkdir -p "$MACOS" "$RESOURCES"
+
+	# Copy binary
+	cp "$DIST_DIR/$APP_NAME" "$MACOS/$APP_NAME"
+
+	# Create Info.plist
+	cat > "$CONTENTS/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>systat</string>
+    <key>CFBundleDisplayName</key>
+    <string>systat</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.systat.app</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleExecutable</key>
+    <string>systat</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+
+	# Create .icns from icon.png if iconutil is available
+	if command -v iconutil &>/dev/null && [[ -f assets/icon.png ]]; then
+		ICONSET=$(mktemp -d)/AppIcon.iconset
+		mkdir -p "$ICONSET"
+		# Generate required sizes from the 1024x1024 source
+		for size in 16 32 64 128 256 512; do
+			sips -z $size $size assets/icon.png --out "$ICONSET/icon_${size}x${size}.png" 2>/dev/null
+		done
+		# @2x variants
+		for size in 16 32 128 256 512; do
+			double=$((size * 2))
+			sips -z $double $double assets/icon.png --out "$ICONSET/icon_${size}x${size}@2x.png" 2>/dev/null
+		done
+		iconutil -c icns "$ICONSET" -o "$RESOURCES/AppIcon.icns" 2>/dev/null || true
+		rm -rf "$(dirname "$ICONSET")"
+		echo "  -> AppIcon.icns created"
+	fi
+
+	echo "  -> $APP_BUNDLE"
+fi
+
+# Show results
+echo ""
+echo "=== Build complete ==="
+ls -lh "$DIST_DIR/$APP_NAME"
+if [[ "$(uname)" == "Darwin" && -d "$DIST_DIR/$APP_NAME.app" ]]; then
+	du -sh "$DIST_DIR/$APP_NAME.app"
+fi

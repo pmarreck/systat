@@ -18,6 +18,7 @@ pub const MemHogs = struct {
 	aggregated: ?[]data.AggregatedProcess = null,
 	total_mem_bytes: u64 = 0,
 	used_mem_bytes: u64 = 0,
+	summary: stats.SystemSummary = .{},
 
 	pub fn init(
 		allocator: std.mem.Allocator,
@@ -54,10 +55,11 @@ pub const MemHogs = struct {
 			self.max_processes,
 		) catch null;
 
-		// 3. Get memory snapshot
+		// 3. Get memory snapshot and system summary
 		const mem_snap = self.stats_iface.getMemSnapshot();
 		self.total_mem_bytes = mem_snap.total_bytes;
 		self.used_mem_bytes = mem_snap.used_bytes;
+		self.summary = self.stats_iface.getSystemSummary();
 	}
 
 	// ── Module vtable methods ────────────────────────────────────────
@@ -66,7 +68,7 @@ pub const MemHogs = struct {
 		return .{
 			.id = "mem_hogs",
 			.display_name = "Memory Hogs",
-			.default_priority = 2,
+			.default_priority = 4,
 			.min_width = 250,
 			.min_height = 200,
 			.preferred_width = 400,
@@ -78,8 +80,65 @@ pub const MemHogs = struct {
 		self.update();
 	}
 
-	pub fn moduleRender(_: *MemHogs) void {
-		// No-op for now — rendering will be added later.
+	pub fn moduleRender(self: *MemHogs) void {
+		const dvui = @import("dvui");
+		const data_mod = @import("../data.zig");
+
+		// Format total/used memory for header
+		var total_buf: [32]u8 = undefined;
+		var used_buf: [32]u8 = undefined;
+		const total_str = data_mod.formatBytes(self.total_mem_bytes, &total_buf);
+		const used_str = data_mod.formatBytes(self.used_mem_bytes, &used_buf);
+
+		dvui.label(@src(), "Memory Hogs \u{2014} {s} / {s}", .{ used_str, total_str }, .{
+			.font = dvui.themeGet().font_heading,
+		});
+
+		if (self.aggregated) |agg| {
+			const Static = struct {
+				var col_widths: [3]f32 = .{ 0, 0, 0 };
+			};
+			var grid = dvui.grid(@src(), .{ .col_widths = &Static.col_widths }, .{}, .{ .expand = .both });
+			defer grid.deinit();
+
+			dvui.columnLayoutProportional(&.{ -3, -1, -1 }, &Static.col_widths, grid.data().contentRect().w);
+
+			dvui.gridHeading(@src(), grid, 0, "Command", .fixed, .{});
+			dvui.gridHeading(@src(), grid, 1, "Memory", .fixed, .{});
+			dvui.gridHeading(@src(), grid, 2, "Procs", .fixed, .{});
+
+			for (agg, 0..) |proc, row| {
+				{
+					var cell = grid.bodyCell(@src(), .{ .col_num = 0, .row_num = row }, .{});
+					defer cell.deinit();
+					dvui.labelNoFmt(@src(), proc.command, .{}, .{});
+				}
+				{
+					var cell = grid.bodyCell(@src(), .{ .col_num = 1, .row_num = row }, .{});
+					defer cell.deinit();
+					var buf: [32]u8 = undefined;
+					const mem_str = data_mod.formatBytes(proc.total_rss_bytes, &buf);
+					dvui.labelNoFmt(@src(), mem_str, .{}, .{});
+				}
+				{
+					var cell = grid.bodyCell(@src(), .{ .col_num = 2, .row_num = row }, .{});
+					defer cell.deinit();
+					dvui.label(@src(), "{d}", .{proc.process_count}, .{});
+				}
+			}
+		} else {
+			dvui.label(@src(), "No data yet", .{}, .{});
+		}
+
+		// Memory detail footer
+		const s = self.summary;
+		var wired_buf: [32]u8 = undefined;
+		var comp_buf: [32]u8 = undefined;
+		const wired_str = data_mod.formatBytes(s.wired_bytes, &wired_buf);
+		const comp_str = data_mod.formatBytes(s.compressor_bytes, &comp_buf);
+		dvui.label(@src(), "Wired: {s}  Compressor: {s}  |  Swap in/out: {d}/{d}", .{
+			wired_str, comp_str, s.swap_ins, s.swap_outs,
+		}, .{ .font = dvui.themeGet().font_mono });
 	}
 
 	pub fn moduleDeinit(self: *MemHogs) void {
@@ -168,7 +227,7 @@ test "moduleInfo returns correct id and priority" {
 	const info = mh.moduleInfo();
 	try testing.expectEqualStrings("mem_hogs", info.id);
 	try testing.expectEqualStrings("Memory Hogs", info.display_name);
-	try testing.expectEqual(@as(u8, 2), info.default_priority);
+	try testing.expectEqual(@as(u8, 4), info.default_priority);
 	try testing.expectEqual(@as(u16, 250), info.min_width);
 	try testing.expectEqual(@as(u16, 200), info.min_height);
 	try testing.expectEqual(@as(u16, 400), info.preferred_width);
@@ -203,6 +262,7 @@ test "deinit frees cached data without leaking" {
 }
 
 test "Module vtable integration" {
+	const dvui = @import("dvui");
 	var mock = MockStats{};
 	const iface = mock.interface();
 	var mh = MemHogs.init(testing.allocator, iface, 10);
@@ -214,7 +274,18 @@ test "Module vtable integration" {
 	m.update();
 	try testing.expect(mh.aggregated != null);
 
-	m.render(); // no-op, should not crash
+	// render() needs DVUI context — test via frame
+	const RenderTest = struct {
+		var render_target: ?*MemHogs = null;
+		fn frame() !dvui.App.Result {
+			if (render_target) |target| target.moduleRender();
+			return .ok;
+		}
+	};
+	RenderTest.render_target = &mh;
+	var t = try dvui.testing.init(.{});
+	defer t.deinit();
+	_ = try dvui.testing.step(RenderTest.frame);
 
 	m.deinit();
 	try testing.expect(mh.aggregated == null);

@@ -2,4 +2,6 @@
 zig-out/
 zig-cache/
 .zig-cache/
+.codescan/
 result
+dist/

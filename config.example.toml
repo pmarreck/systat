@@ -1,0 +1,47 @@
+# systat configuration
+# Copy this file to config.toml to customize.
+# Changes are detected automatically (hot-reload).
+
+# General settings
+update_interval_ms = 1000   # How often to refresh data (milliseconds)
+process_count = 15          # Max processes shown per module
+
+# Theme: "neon_orange", "neon_cyan", or "custom"
+theme = "neon_orange"
+
+# Module configuration
+# Each module can be enabled/disabled and have its display priority overridden.
+# Priority: 1 = highest (shown first), 255 = lowest.
+# Priority 0 means "use module default".
+
+[cpu_hogs]
+enabled = true
+priority = 0    # default: 1
+
+[mem_hogs]
+enabled = true
+priority = 0    # default: 2
+
+[cpu_graph]
+enabled = true
+priority = 0    # default: 3
+
+[ping_monitor]
+enabled = true
+priority = 0    # default: 4
+hosts = ["google.com", "github.com", "cloudflare.com"]
+ping_interval_ms = 2000
+
+# Custom theme colors (only used when theme = "custom")
+# All values are hex color strings like "#FF6600".
+# Any omitted field falls back to the neon_orange preset.
+
+# [custom_theme]
+# background = "#0D0D0D"
+# primary = "#FF6600"
+# accent = "#9933FF"
+# success = "#00FF66"
+# warning = "#FFCC00"
+# err = "#FF3333"
+# text = "#E0E0E0"
+# text_dim = "#808080"

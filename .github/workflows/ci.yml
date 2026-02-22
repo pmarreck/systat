@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [yolo]
+  pull_request:
+    branches: [yolo]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            name: linux-x86_64
+            package: default
+            binary: systat
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+            name: linux-aarch64
+            package: default
+            binary: systat
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            name: macos-aarch64
+            package: macos-aarch64
+            binary: systat
+          - runner: macos-14
+            system: aarch64-darwin
+            name: macos-aarch64-native
+            package: default
+            binary: systat
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            name: windows-x86_64
+            package: windows-x86_64
+            binary: systat.exe
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            name: windows-aarch64
+            package: windows-aarch64
+            binary: systat.exe
+
+    runs-on: ${{ matrix.runner }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+        timeout-minutes: 5
+        continue-on-error: true
+
+      - name: Build
+        run: nix build .#packages.${{ matrix.system }}.${{ matrix.package }}
+
+      - name: Prepare artifact
+        run: cp -L result/bin/${{ matrix.binary }} systat-${{ matrix.name }}${{ matrix.binary == 'systat.exe' && '.exe' || '' }}
+
+      - name: Test
+        if: matrix.package == 'default'
+        run: nix build .#checks.${{ matrix.system }}.test
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: systat-${{ matrix.name }}
+          path: systat-${{ matrix.name }}*

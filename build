@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# Cross-compilation matrix build for systat
+# Builds for all supported targets using Zig's cross-compilation.
+# Usage: ./build [--release] [--target TARGET]
+#   --release   Build with ReleaseFast optimization (default: Debug)
+#   --target X  Build only the specified target (e.g. x86_64-linux-musl)
+#   No args     Build all targets
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+OPTIMIZE=""
+RELEASE_FLAG=""
+SINGLE_TARGET=""
+DIST_DIR="dist"
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--release)
+			OPTIMIZE="-Doptimize=ReleaseFast"
+			RELEASE_FLAG="--release=fast"
+			shift
+			;;
+		--target)
+			SINGLE_TARGET="$2"
+			shift 2
+			;;
+		*)
+			echo "Usage: $0 [--release] [--target TARGET]"
+			echo ""
+			echo "Targets:"
+			echo "  x86_64-linux-musl        Linux x86_64"
+			echo "  aarch64-linux-musl       Linux ARM64"
+			echo "  x86_64-windows-gnu       Windows x86_64"
+			echo "  aarch64-windows-gnu      Windows ARM64"
+			echo "  aarch64-macos            macOS ARM64 (Apple Silicon)"
+			echo "  (native)                 Current platform"
+			exit 1
+			;;
+	esac
+done
+
+# All cross-compilation targets
+TARGETS=(
+	"x86_64-linux-musl"
+	"aarch64-linux-musl"
+	"x86_64-windows-gnu"
+	"aarch64-windows-gnu"
+	"aarch64-macos"
+)
+
+build_target() {
+	local target="$1"
+	local label="$target"
+	local target_flag="-Dtarget=$target"
+
+	# Determine output binary name
+	local binary="systat"
+	case "$target" in
+		*windows*) binary="systat.exe" ;;
+	esac
+
+	printf "  %-30s " "$label"
+
+	local start_time
+	start_time=$(date +%s)
+
+	if zig build $OPTIMIZE $RELEASE_FLAG "$target_flag" 2>/tmp/systat-build-$$.log; then
+		local end_time
+		end_time=$(date +%s)
+		local elapsed=$(( end_time - start_time ))
+
+		# Copy to dist directory
+		mkdir -p "$DIST_DIR"
+		local dest="$DIST_DIR/systat-${target}${binary##systat}"
+		if [ -f "zig-out/bin/$binary" ]; then
+			cp "zig-out/bin/$binary" "$dest"
+			local size
+			size=$(du -h "$dest" | cut -f1 | tr -d ' ')
+			echo "OK  (${elapsed}s, ${size})"
+		else
+			echo "OK  (${elapsed}s, binary not found in zig-out)"
+		fi
+	else
+		echo "FAIL"
+		cat /tmp/systat-build-$$.log | tail -20
+		return 1
+	fi
+}
+
+build_native() {
+	printf "  %-30s " "(native)"
+
+	local start_time
+	start_time=$(date +%s)
+
+	if zig build $OPTIMIZE $RELEASE_FLAG 2>/tmp/systat-build-$$.log; then
+		local end_time
+		end_time=$(date +%s)
+		local elapsed=$(( end_time - start_time ))
+
+		mkdir -p "$DIST_DIR"
+		if [ -f "zig-out/bin/systat" ]; then
+			cp "zig-out/bin/systat" "$DIST_DIR/systat-native"
+			local size
+			size=$(du -h "$DIST_DIR/systat-native" | cut -f1 | tr -d ' ')
+			echo "OK  (${elapsed}s, ${size})"
+		else
+			echo "OK  (${elapsed}s)"
+		fi
+	else
+		echo "FAIL"
+		cat /tmp/systat-build-$$.log | tail -20
+		return 1
+	fi
+}
+
+echo "systat cross-compilation matrix build"
+echo "======================================"
+if [ -n "$OPTIMIZE" ]; then
+	echo "Mode: ReleaseFast"
+else
+	echo "Mode: Debug"
+fi
+echo ""
+
+mkdir -p "$DIST_DIR"
+FAILED=0
+
+if [ -n "$SINGLE_TARGET" ]; then
+	echo "Building single target:"
+	if [ "$SINGLE_TARGET" = "native" ]; then
+		build_native || FAILED=1
+	else
+		build_target "$SINGLE_TARGET" || FAILED=1
+	fi
+else
+	echo "Building native:"
+	build_native || FAILED=1
+
+	echo ""
+	echo "Cross-compiling:"
+	for target in "${TARGETS[@]}"; do
+		build_target "$target" || FAILED=$((FAILED + 1))
+	done
+fi
+
+echo ""
+if [ "$FAILED" -eq 0 ]; then
+	echo "All builds succeeded. Artifacts in $DIST_DIR/"
+	ls -lh "$DIST_DIR/"
+else
+	echo "$FAILED build(s) failed."
+	exit 1
+fi

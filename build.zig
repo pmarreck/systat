@@ -50,7 +50,7 @@ pub fn build(b: *std.Build) void {
         });
 
         mod.addImport("dvui", dvui_dep.module("dvui_sdl3"));
-        mod.addImport("sdl-backend", dvui_dep.module("sdl3"));
+        mod.addImport("backend", dvui_dep.module("sdl3"));
         mod.addImport("toml", toml_dep.module("toml"));
 
         const exe = b.addExecutable(.{
@@ -67,5 +67,14 @@ pub fn build(b: *std.Build) void {
         if (b.args) |args| run_cmd.addArgs(args);
         const run_step = b.step("run", "Run systat");
         run_step.dependOn(&run_cmd.step);
+
+        // --- Smoke test: launch binary, verify no crash, kill ---
+        const smoke_cmd = b.addSystemCommand(&.{
+            "bash", "scripts/smoke_test.sh",
+        });
+        smoke_cmd.addArtifactArg(exe);
+        smoke_cmd.step.dependOn(compile_step);
+        const smoke_step = b.step("smoke", "Smoke test: launch app, verify no crash, kill");
+        smoke_step.dependOn(&smoke_cmd.step);
     }
 }

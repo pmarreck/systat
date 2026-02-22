@@ -19,6 +19,8 @@ pub const CpuGraph = struct {
 	stats_iface: stats.SystemStats,
 	history: RingBuffer(CpuSample, HISTORY_SIZE),
 	sample_count: u64,
+	last_update_ns: i128 = 0,
+	update_interval_ns: i128 = 1_000_000_000, // 1 second
 
 	pub fn init(stats_iface: stats.SystemStats) CpuGraph {
 		return .{
@@ -28,8 +30,12 @@ pub const CpuGraph = struct {
 		};
 	}
 
-	/// Poll the stats interface and append a new sample.
+	/// Poll the stats interface and append a new sample (rate-limited to 1/sec).
 	pub fn update(self: *CpuGraph) void {
+		const now = std.time.nanoTimestamp();
+		if (self.last_update_ns != 0 and now - self.last_update_ns < self.update_interval_ns) return;
+		self.last_update_ns = now;
+
 		const snap = self.stats_iface.getCpuSnapshot();
 		self.history.push(.{
 			.total_percent = snap.total_percent,
@@ -66,7 +72,7 @@ pub const CpuGraph = struct {
 		return .{
 			.id = "cpu_graph",
 			.display_name = "CPU Usage",
-			.default_priority = 3,
+			.default_priority = 1,
 			.min_width = 300,
 			.min_height = 200,
 			.preferred_width = 500,
@@ -78,8 +84,51 @@ pub const CpuGraph = struct {
 		self.update();
 	}
 
-	pub fn moduleRender(_: *CpuGraph) void {
-		// No-op — rendering will be wired up in a later task.
+	pub fn moduleRender(self: *CpuGraph) void {
+		const dvui = @import("dvui");
+
+		const current = self.currentPercent() orelse 0;
+		dvui.label(@src(), "CPU Usage \u{2014} {d:.1}%", .{current}, .{
+			.font = dvui.themeGet().font_heading,
+		});
+
+		if (self.dataPointCount() == 0) {
+			dvui.label(@src(), "No data yet", .{}, .{});
+			return;
+		}
+
+		const Static = struct {
+			var y_axis: dvui.PlotWidget.Axis = .{
+				.name = "CPU %",
+				.min = 0,
+				.max = 100,
+			};
+			var x_axis: dvui.PlotWidget.Axis = .{
+				.name = "Seconds Ago",
+			};
+		};
+
+		// Fixed sliding window: always show last HISTORY_SIZE seconds
+		Static.x_axis.min = -@as(f32, @floatFromInt(HISTORY_SIZE));
+		Static.x_axis.max = 0;
+
+		var plot = dvui.plot(@src(), .{
+			.x_axis = &Static.x_axis,
+			.y_axis = &Static.y_axis,
+		}, .{ .expand = .both, .min_size_content = .{ .h = 100 } });
+		defer plot.deinit();
+
+		var line = plot.line();
+		defer line.deinit();
+
+		// Plot as "seconds ago": newest sample = 0, older = negative
+		const now: i64 = if (self.sample_count > 0) @intCast(self.sample_count - 1) else 0;
+		for (0..self.dataPointCount()) |i| {
+			const sample = self.getDataPoint(i);
+			const seconds_ago: f64 = @floatFromInt(sample.timestamp_ms - now);
+			line.point(seconds_ago, sample.total_percent);
+		}
+		line.stroke(1.5, dvui.themeGet().focus);
 	}
 
 	pub fn moduleDeinit(_: *CpuGraph) void {
@@ -109,6 +158,7 @@ test "init creates empty history" {
 test "update adds data points" {
 	var mock = MockStats{};
 	var graph = CpuGraph.init(mock.interface());
+	graph.update_interval_ns = 0; // disable rate limiting for tests
 
 	graph.update();
 	graph.update();
@@ -120,6 +170,7 @@ test "update adds data points" {
 test "data points have correct values" {
 	var mock = MockStats{};
 	var graph = CpuGraph.init(mock.interface());
+	graph.update_interval_ns = 0;
 
 	graph.update();
 
@@ -130,6 +181,7 @@ test "data points have correct values" {
 test "currentPercent returns latest" {
 	var mock = MockStats{};
 	var graph = CpuGraph.init(mock.interface());
+	graph.update_interval_ns = 0;
 
 	// Update three times with the default mock (42.5%)
 	graph.update();
@@ -156,6 +208,7 @@ test "currentPercent returns latest" {
 test "ring buffer wraps at HISTORY_SIZE" {
 	var mock = MockStats{};
 	var graph = CpuGraph.init(mock.interface());
+	graph.update_interval_ns = 0;
 
 	const overflow = HISTORY_SIZE + 10;
 	for (0..overflow) |_| {
@@ -177,6 +230,7 @@ test "ring buffer wraps at HISTORY_SIZE" {
 test "clear resets everything" {
 	var mock = MockStats{};
 	var graph = CpuGraph.init(mock.interface());
+	graph.update_interval_ns = 0;
 
 	graph.update();
 	graph.update();
@@ -196,7 +250,7 @@ test "moduleInfo returns correct id and priority" {
 
 	try testing.expectEqualStrings("cpu_graph", info.id);
 	try testing.expectEqualStrings("CPU Usage", info.display_name);
-	try testing.expectEqual(@as(u8, 3), info.default_priority);
+	try testing.expectEqual(@as(u8, 1), info.default_priority);
 	try testing.expectEqual(@as(u16, 300), info.min_width);
 	try testing.expectEqual(@as(u16, 200), info.min_height);
 	try testing.expectEqual(@as(u16, 500), info.preferred_width);
@@ -206,6 +260,7 @@ test "moduleInfo returns correct id and priority" {
 test "timestamps increment monotonically" {
 	var mock = MockStats{};
 	var graph = CpuGraph.init(mock.interface());
+	graph.update_interval_ns = 0;
 
 	graph.update();
 	graph.update();
@@ -220,8 +275,10 @@ test "timestamps increment monotonically" {
 }
 
 test "Module vtable dispatches correctly" {
+	const dvui = @import("dvui");
 	var mock = MockStats{};
 	var graph = CpuGraph.init(mock.interface());
+	graph.update_interval_ns = 0;
 	const m = graph.module();
 
 	// info() dispatches through the vtable
@@ -233,7 +290,19 @@ test "Module vtable dispatches correctly" {
 	m.update();
 	try testing.expectEqual(@as(usize, 1), graph.dataPointCount());
 
-	// render() and deinit() should not panic
-	m.render();
+	// render() needs DVUI context — test via frame
+	const RenderTest = struct {
+		var render_target: ?*CpuGraph = null;
+		fn frame() !dvui.App.Result {
+			if (render_target) |target| target.moduleRender();
+			return .ok;
+		}
+	};
+	RenderTest.render_target = &graph;
+	var t = try dvui.testing.init(.{});
+	defer t.deinit();
+	_ = try dvui.testing.step(RenderTest.frame);
+
+	// deinit() should not panic
 	m.deinit();
 }

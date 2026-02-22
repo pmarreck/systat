@@ -17,6 +17,7 @@ pub const CpuHogs = struct {
 	aggregated: ?[]data.AggregatedProcess = null,
 	system_cpu_percent: f64 = 0,
 	num_cores: u16 = 0,
+	summary: stats.SystemSummary = .{},
 
 	pub fn init(allocator: std.mem.Allocator, stats_iface: stats.SystemStats, max_processes: u16) CpuHogs {
 		return .{
@@ -46,6 +47,7 @@ pub const CpuHogs = struct {
 
 		self.system_cpu_percent = cpu_snap.total_percent;
 		self.num_cores = cpu_snap.num_cores;
+		self.summary = self.stats_iface.getSystemSummary();
 
 		// Aggregate processes by CPU
 		self.aggregated = data.aggregateProcesses(
@@ -62,7 +64,7 @@ pub const CpuHogs = struct {
 		return .{
 			.id = "cpu_hogs",
 			.display_name = "CPU Hogs",
-			.default_priority = 1,
+			.default_priority = 3,
 			.min_width = 250,
 			.min_height = 200,
 			.preferred_width = 400,
@@ -74,8 +76,53 @@ pub const CpuHogs = struct {
 		self.update();
 	}
 
-	pub fn moduleRender(_: *CpuHogs) void {
-		// No-op for now — rendering added in Task 17
+	pub fn moduleRender(self: *CpuHogs) void {
+		const dvui = @import("dvui");
+
+		dvui.label(@src(), "CPU Hogs \u{2014} {d:.1}% total ({d} cores)", .{
+			self.system_cpu_percent, self.num_cores,
+		}, .{ .font = dvui.themeGet().font_heading });
+
+		if (self.aggregated) |agg| {
+			const Static = struct {
+				var col_widths: [3]f32 = .{ 0, 0, 0 };
+			};
+			var grid = dvui.grid(@src(), .{ .col_widths = &Static.col_widths }, .{}, .{ .expand = .both });
+			defer grid.deinit();
+
+			dvui.columnLayoutProportional(&.{ -3, -1, -1 }, &Static.col_widths, grid.data().contentRect().w);
+
+			dvui.gridHeading(@src(), grid, 0, "Command", .fixed, .{});
+			dvui.gridHeading(@src(), grid, 1, "CPU %", .fixed, .{});
+			dvui.gridHeading(@src(), grid, 2, "Procs", .fixed, .{});
+
+			for (agg, 0..) |proc, row| {
+				{
+					var cell = grid.bodyCell(@src(), .{ .col_num = 0, .row_num = row }, .{});
+					defer cell.deinit();
+					dvui.labelNoFmt(@src(), proc.command, .{}, .{});
+				}
+				{
+					var cell = grid.bodyCell(@src(), .{ .col_num = 1, .row_num = row }, .{});
+					defer cell.deinit();
+					dvui.label(@src(), "{d:.1}%", .{proc.total_cpu_percent}, .{});
+				}
+				{
+					var cell = grid.bodyCell(@src(), .{ .col_num = 2, .row_num = row }, .{});
+					defer cell.deinit();
+					dvui.label(@src(), "{d}", .{proc.process_count}, .{});
+				}
+			}
+		} else {
+			dvui.label(@src(), "No data yet", .{}, .{});
+		}
+
+		// System summary footer
+		const s = self.summary;
+		dvui.label(@src(), "Load: {d:.2} {d:.2} {d:.2}  |  {d} procs ({d} run, {d} sleep, {d} thr)", .{
+			s.load_avg_1, s.load_avg_5, s.load_avg_15,
+			s.processes_total, s.processes_running, s.processes_sleeping, s.threads_total,
+		}, .{ .font = dvui.themeGet().font_mono });
 	}
 
 	pub fn moduleDeinit(self: *CpuHogs) void {
@@ -157,7 +204,7 @@ test "moduleInfo returns correct id" {
 	const info = hogs.moduleInfo();
 	try testing.expectEqualStrings("cpu_hogs", info.id);
 	try testing.expectEqualStrings("CPU Hogs", info.display_name);
-	try testing.expectEqual(@as(u8, 1), info.default_priority);
+	try testing.expectEqual(@as(u8, 3), info.default_priority);
 	try testing.expectEqual(@as(u16, 250), info.min_width);
 	try testing.expectEqual(@as(u16, 200), info.min_height);
 	try testing.expectEqual(@as(u16, 400), info.preferred_width);
@@ -196,6 +243,7 @@ test "deinit frees cached data (no memory leak)" {
 }
 
 test "Module vtable integration" {
+	const dvui = @import("dvui");
 	var m = mock.MockStats{};
 	const iface = m.interface();
 	var hogs = CpuHogs.init(testing.allocator, iface, 10);
@@ -211,8 +259,18 @@ test "Module vtable integration" {
 	mod.update();
 	try testing.expect(hogs.aggregated != null);
 
-	// render() is a no-op but should not crash
-	mod.render();
+	// render() needs DVUI context — test via frame
+	const RenderTest = struct {
+		var render_target: ?*CpuHogs = null;
+		fn frame() !dvui.App.Result {
+			if (render_target) |target| target.moduleRender();
+			return .ok;
+		}
+	};
+	RenderTest.render_target = &hogs;
+	var t = try dvui.testing.init(.{});
+	defer t.deinit();
+	_ = try dvui.testing.step(RenderTest.frame);
 
 	// deinit() dispatches correctly
 	mod.deinit();
