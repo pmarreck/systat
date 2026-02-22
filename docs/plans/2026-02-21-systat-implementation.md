@@ -12,6 +12,39 @@
 
 ---
 
+## TDD Execution Protocol: Split-Context Red/Green
+
+**All TDD tasks use two separate agent contexts to prevent confirmation bias:**
+
+### Test Agent (Red Phase)
+- Sees: design doc, interface contracts, and this plan's behavioral specifications
+- Does NOT see: implementation code or suggested algorithms
+- Creates: file with type definitions, function signatures (stubs returning `error.NotImplemented` or `unreachable`), and comprehensive tests
+- Focus: "What is the contract? What are the edge cases? What are the invariants? What could go wrong?"
+- Commits the test file with stubs
+
+### Implementation Agent (Green Phase)
+- Sees: the committed test file with failing tests
+- Does NOT see: the design doc's suggested implementation pseudocode
+- Creates: minimal correct implementation to make all tests pass
+- Focus: "How do I satisfy this contract with the least code?"
+- If a test appears genuinely wrong (tests incorrect behavior per the spec), flags it for human review rather than silently fixing it
+- Commits the implementation
+
+### Why This Matters
+The same agent writing both test and implementation can unconsciously write weak tests that match a lazy implementation. Splitting contexts enforces honest TDD — the test author is incentivized to be thorough (specifying the contract completely), and the implementer is forced to satisfy a contract they didn't author.
+
+### GUI Testing Note
+DVUI provides a `.testing` backend with:
+- Synthetic input: `dvui.testing.moveTo("tag")`, `.click(.left)`, `.pressKey()`, `.writeText()`
+- Instant frame advancement: `step(frame_fn)` and `settle(frame_fn)` with no real-time delays
+- State assertions: `expectFocused("tag")`, `expectVisible("tag")`, `tagGet("tag").rect`
+- Snapshot hashing for regression detection
+
+This means GUI behavior (module visibility, layout changes, menu interactions) CAN be TDD'd too.
+
+---
+
 ## Task 1: Project Scaffolding - Nix Flake
 
 **Files:**
