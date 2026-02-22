@@ -13,7 +13,7 @@ pub const PingModuleConfig = struct {
 	hosts: []const []const u8 = &default_hosts,
 	ping_interval_ms: u32 = 2000,
 
-	const default_hosts = [_][]const u8{ "google.com", "github.com", "cloudflare.com" };
+	const default_hosts = [_][]const u8{ "google.com", "youtube.com", "chatgpt.com", "facebook.com", "x.com", "github.com", "amazon.com" };
 };
 
 /// Default theme color palette as hex strings (non-optional).
@@ -120,13 +120,17 @@ test "parseConfig returns defaults for empty input" {
 	try testing.expect(pr.arena == null);
 }
 
-test "default ping hosts are google, github, cloudflare" {
+test "default ping hosts match webping defaults" {
 	const cfg = defaultConfig();
 	const hosts = cfg.ping_monitor.hosts;
-	try testing.expectEqual(@as(usize, 3), hosts.len);
+	try testing.expectEqual(@as(usize, 7), hosts.len);
 	try testing.expectEqualStrings("google.com", hosts[0]);
-	try testing.expectEqualStrings("github.com", hosts[1]);
-	try testing.expectEqualStrings("cloudflare.com", hosts[2]);
+	try testing.expectEqualStrings("youtube.com", hosts[1]);
+	try testing.expectEqualStrings("chatgpt.com", hosts[2]);
+	try testing.expectEqualStrings("facebook.com", hosts[3]);
+	try testing.expectEqualStrings("x.com", hosts[4]);
+	try testing.expectEqualStrings("github.com", hosts[5]);
+	try testing.expectEqualStrings("amazon.com", hosts[6]);
 }
 
 test "default ping interval is 2000ms" {

@@ -156,6 +156,39 @@ pub const PingMonitor = struct {
 				line.stroke(1.5, line_colors[host_idx % line_colors.len]);
 			}
 		}
+
+		// Legend: colored dots with hostnames
+		{
+			var legend_row = dvui.box(@src(), .{ .dir = .horizontal }, .{
+				.padding = dvui.Rect.all(2),
+			});
+			defer legend_row.deinit();
+
+			for (0..self.host_count) |host_idx| {
+				if (self.hosts[host_idx]) |host_data| {
+					const color = line_colors[host_idx % line_colors.len];
+					// Latest latency for this host
+					const latest_ms: ?f64 = if (host_data.history.len() > 0)
+						host_data.history.get(host_data.history.len() - 1).latency_ms
+					else
+						null;
+
+					if (latest_ms) |ms| {
+						dvui.label(@src(), "\u{25CF} {s}: {d:.0}ms", .{ host_data.hostname, ms }, .{
+							.font = dvui.themeGet().font_mono,
+							.color_text = color,
+							.id_extra = @intCast(host_idx),
+						});
+					} else {
+						dvui.label(@src(), "\u{25CF} {s}: --", .{host_data.hostname}, .{
+							.font = dvui.themeGet().font_mono,
+							.color_text = color,
+							.id_extra = @intCast(host_idx),
+						});
+					}
+				}
+			}
+		}
 	}
 
 	pub fn moduleDeinit(_: *PingMonitor) void {

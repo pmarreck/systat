@@ -127,6 +127,8 @@ else
 fi
 echo ""
 
+# Clean dist directory to avoid stale artifacts
+rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 FAILED=0
 

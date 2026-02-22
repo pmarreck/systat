@@ -29,7 +29,7 @@ priority = 0    # default: 3
 [ping_monitor]
 enabled = true
 priority = 0    # default: 4
-hosts = ["google.com", "github.com", "cloudflare.com"]
+hosts = ["google.com", "youtube.com", "chatgpt.com", "facebook.com", "x.com", "github.com", "amazon.com"]
 ping_interval_ms = 2000
 
 # Custom theme colors (only used when theme = "custom")

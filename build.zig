@@ -57,6 +57,8 @@ pub fn build(b: *std.Build) void {
             .name = "systat",
             .root_module = mod,
         });
+        // GUI app: use Windows subsystem to suppress console window
+        exe.subsystem = .Windows;
 
         const compile_step = b.step("compile", "Compile the app");
         compile_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
