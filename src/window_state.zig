@@ -2,6 +2,7 @@
 //! State is stored as a simple text file in the user's config directory.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const WindowState = struct {
 	width: i32,
@@ -15,7 +16,16 @@ const state_filename = "window_state";
 /// Get the path to the window state file.
 /// Returns null if the config directory can't be determined.
 fn getStatePath(buf: *[std.fs.max_path_bytes]u8) ?[]const u8 {
-	// Try XDG_CONFIG_HOME, then ~/.config
+	return getStatePathImpl(buf);
+}
+
+fn getStatePathImpl(buf: anytype) ?[]const u8 {
+	if (comptime builtin.os.tag == .windows) {
+		// Windows support is a stub for now — window state persistence
+		// will be implemented when a Windows platform backend exists.
+		return null;
+	}
+	// POSIX: try XDG_CONFIG_HOME, then ~/.config
 	if (std.posix.getenv("XDG_CONFIG_HOME")) |xdg| {
 		return std.fmt.bufPrint(buf, "{s}/systat/{s}", .{ xdg, state_filename }) catch null;
 	}
@@ -27,7 +37,8 @@ fn getStatePath(buf: *[std.fs.max_path_bytes]u8) ?[]const u8 {
 
 /// Ensure the parent directory exists for the state file.
 fn ensureDir(path: []const u8) void {
-	if (std.mem.lastIndexOfScalar(u8, path, '/')) |pos| {
+	const sep: u8 = if (comptime builtin.os.tag == .windows) '\\' else '/';
+	if (std.mem.lastIndexOfScalar(u8, path, sep)) |pos| {
 		const dir_path = path[0..pos];
 		std.fs.cwd().makePath(dir_path) catch {};
 	}

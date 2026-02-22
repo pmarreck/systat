@@ -43,12 +43,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # All cross-compilation targets
+# Note: macOS cross-compile requires --sysroot (SDL3 requirement),
+# so macOS builds must be done natively or in CI with proper SDK.
 TARGETS=(
 	"x86_64-linux-musl"
 	"aarch64-linux-musl"
 	"x86_64-windows-gnu"
 	"aarch64-windows-gnu"
-	"aarch64-macos"
 )
 
 build_target() {
