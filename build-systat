@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OPTIMIZE="ReleaseFast"
+for arg in "$@"; do
+	case "$arg" in
+		--debug) OPTIMIZE="Debug" ;;
+		--test) exec nix develop -c zig build test ;;
+		--help|-h) echo "Usage: ./build-systat [--debug|--test]"; exit 0 ;;
+	esac
+done
+
+nix develop -c zig build -Doptimize="$OPTIMIZE"
+echo "Build complete (${OPTIMIZE}): zig-out/bin/systat"
