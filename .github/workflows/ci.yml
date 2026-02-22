@@ -21,31 +21,31 @@ jobs:
             name: linux-x86_64
             package: default
             binary: systat
+            archive: tar.gz
           - runner: ubuntu-24.04-arm
             system: aarch64-linux
             name: linux-aarch64
             package: default
             binary: systat
-          - runner: ubuntu-latest
-            system: x86_64-linux
-            name: macos-aarch64
-            package: macos-aarch64
-            binary: systat
+            archive: tar.gz
           - runner: macos-14
             system: aarch64-darwin
-            name: macos-aarch64-native
+            name: macos-aarch64
             package: default
             binary: systat
+            archive: zip
           - runner: ubuntu-latest
             system: x86_64-linux
             name: windows-x86_64
             package: windows-x86_64
             binary: systat.exe
+            archive: zip
           - runner: ubuntu-latest
             system: x86_64-linux
             name: windows-aarch64
             package: windows-aarch64
             binary: systat.exe
+            archive: zip
 
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}
@@ -62,15 +62,81 @@ jobs:
       - name: Build
         run: nix build .#packages.${{ matrix.system }}.${{ matrix.package }}
 
-      - name: Prepare artifact
-        run: cp -L result/bin/${{ matrix.binary }} systat-${{ matrix.name }}${{ matrix.binary == 'systat.exe' && '.exe' || '' }}
-
       - name: Test
         if: matrix.package == 'default'
         run: nix build .#checks.${{ matrix.system }}.test
+
+      - name: Package macOS .app bundle
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p staging/systat.app/Contents/{MacOS,Resources}
+          cp -L result/bin/systat staging/systat.app/Contents/MacOS/systat
+          cp -L result/bin/systat staging/systat
+
+          # Info.plist
+          cat > staging/systat.app/Contents/Info.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>systat</string>
+              <key>CFBundleDisplayName</key>
+              <string>systat</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.systat.app</string>
+              <key>CFBundleVersion</key>
+              <string>0.1.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.1.0</string>
+              <key>CFBundleExecutable</key>
+              <string>systat</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>12.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSSupportsAutomaticGraphicsSwitching</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Create .icns from icon.png
+          if [ -f assets/icon.png ]; then
+            ICONSET=$(mktemp -d)/AppIcon.iconset
+            mkdir -p "$ICONSET"
+            for size in 16 32 64 128 256 512; do
+              sips -z $size $size assets/icon.png --out "$ICONSET/icon_${size}x${size}.png" &>/dev/null
+            done
+            for size in 16 32 128 256 512; do
+              double=$((size * 2))
+              sips -z $double $double assets/icon.png --out "$ICONSET/icon_${size}x${size}@2x.png" &>/dev/null
+            done
+            iconutil -c icns "$ICONSET" -o staging/systat.app/Contents/Resources/AppIcon.icns || true
+            rm -rf "$(dirname "$ICONSET")"
+          fi
+
+      - name: Package Linux/Windows binary
+        if: runner.os != 'macOS'
+        run: |
+          mkdir -p staging
+          cp -L result/bin/${{ matrix.binary }} staging/${{ matrix.binary }}
+
+      - name: Create archive
+        run: |
+          cd staging
+          if [ "${{ matrix.archive }}" = "tar.gz" ]; then
+            tar czf ../systat-${{ matrix.name }}.tar.gz *
+          else
+            zip -r ../systat-${{ matrix.name }}.zip *
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: systat-${{ matrix.name }}
-          path: systat-${{ matrix.name }}*
+          path: systat-${{ matrix.name }}.${{ matrix.archive }}
