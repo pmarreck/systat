@@ -48,3 +48,15 @@ test "basic frame" {
 
     try dvui.testing.settle(appFrame);
 }
+
+// Import all modules so their tests are discovered by `zig build test`.
+comptime {
+    _ = @import("ring_buffer.zig");
+    _ = @import("module.zig");
+    _ = @import("layout.zig");
+    _ = @import("config.zig");
+    _ = @import("theme.zig");
+    _ = @import("data.zig");
+    _ = @import("platform/stats.zig");
+    _ = @import("platform/mock.zig");
+}
