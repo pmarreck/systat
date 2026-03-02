@@ -25,17 +25,27 @@ pub const PingMonitor = struct {
 	host_count: usize,
 	ping_interval_ns: i128,
 	last_ping_ns: i128 = 0,
+	next_host_idx: usize = 0, // round-robin index for one-host-per-tick
 
 	pub fn init(stats_iface: stats.SystemStats, hostnames: []const []const u8) PingMonitor {
 		return initWithInterval(stats_iface, hostnames, 2000);
 	}
 
 	pub fn initWithInterval(stats_iface: stats.SystemStats, hostnames: []const []const u8, interval_ms: u32) PingMonitor {
+		const count = @min(hostnames.len, MAX_HOSTS);
+		// Per-host tick rate: total interval / host count, so each host
+		// gets pinged once per configured interval without blocking on
+		// all hosts at once.
+		const tick_ns: i128 = if (count > 0)
+			@divTrunc(@as(i128, interval_ms) * 1_000_000, @as(i128, @intCast(count)))
+		else
+			@as(i128, interval_ms) * 1_000_000;
+
 		var self = PingMonitor{
 			.stats_iface = stats_iface,
 			.hosts = [_]?HostData{null} ** MAX_HOSTS,
-			.host_count = @min(hostnames.len, MAX_HOSTS),
-			.ping_interval_ns = @as(i128, interval_ms) * 1_000_000,
+			.host_count = count,
+			.ping_interval_ns = tick_ns,
 		};
 		for (hostnames[0..self.host_count], 0..) |hostname, i| {
 			self.hosts[i] = .{
@@ -48,20 +58,24 @@ pub const PingMonitor = struct {
 	}
 
 	pub fn update(self: *PingMonitor) void {
-		// Rate-limit: only ping at the configured interval
+		if (self.host_count == 0) return;
+
+		// Rate-limit: one host per tick (round-robin)
 		const now = std.time.nanoTimestamp();
 		if (self.last_ping_ns != 0 and now - self.last_ping_ns < self.ping_interval_ns) return;
 		self.last_ping_ns = now;
 
-		for (self.hosts[0..self.host_count]) |*maybe_host| {
-			if (maybe_host.*) |*host_data| {
-				const result = self.stats_iface.ping(host_data.hostname);
-				host_data.history.push(.{
-					.latency_ms = result.latency_ms,
-					.sample_index = host_data.sample_count,
-				});
-				host_data.sample_count += 1;
-			}
+		// Ping just the next host in rotation
+		const idx = self.next_host_idx;
+		self.next_host_idx = (idx + 1) % self.host_count;
+
+		if (self.hosts[idx]) |*host_data| {
+			const result = self.stats_iface.ping(host_data.hostname);
+			host_data.history.push(.{
+				.latency_ms = result.latency_ms,
+				.sample_index = host_data.sample_count,
+			});
+			host_data.sample_count += 1;
 		}
 	}
 
@@ -106,14 +120,30 @@ pub const PingMonitor = struct {
 			var y_axis: dvui.PlotWidget.Axis = .{
 				.name = "ms",
 				.min = 0,
+				.max = 200,
 			};
 			var x_axis: dvui.PlotWidget.Axis = .{
 				.name = "Seconds Ago",
 			};
 		};
 
-		// Fixed sliding window: total seconds = HISTORY_SIZE * interval
-		const interval_sec: f32 = @floatCast(@as(f64, @floatFromInt(self.ping_interval_ns)) / 1_000_000_000.0);
+		// Auto-scale Y axis: scan all data for peak, minimum 200ms
+		var max_latency: f64 = 200.0;
+		for (0..self.host_count) |hi| {
+			if (self.hosts[hi]) |host_data| {
+				for (0..host_data.history.len()) |i| {
+					if (host_data.history.get(i).latency_ms) |ms| {
+						if (ms > max_latency) max_latency = ms;
+					}
+				}
+			}
+		}
+		Static.y_axis.max = @floatCast(max_latency * 1.1); // 10% headroom
+
+		// Fixed sliding window: total seconds = HISTORY_SIZE * per-host interval
+		// ping_interval_ns is per-tick (divided by host_count), so multiply back
+		const per_host_ns: f64 = @floatFromInt(self.ping_interval_ns * @as(i128, @intCast(if (self.host_count > 0) self.host_count else 1)));
+		const interval_sec: f32 = @floatCast(per_host_ns / 1_000_000_000.0);
 		const window_sec: f32 = @as(f32, @floatFromInt(HISTORY_SIZE)) * interval_sec;
 		Static.x_axis.min = -window_sec;
 		Static.x_axis.max = 0;
@@ -236,7 +266,10 @@ test "update pings all hosts" {
 	const iface = mock.interface();
 	const hostnames: [2][]const u8 = .{ "google.com", "github.com" };
 	var pm = PingMonitor.init(iface, &hostnames);
+	pm.ping_interval_ns = 0; // disable rate limiting for tests
 
+	// Round-robin: one host per update() call, so need 2 calls for 2 hosts
+	pm.update();
 	pm.update();
 
 	// Each host should now have exactly 1 data point
@@ -280,6 +313,10 @@ test "per-host history independent" {
 	var pm = PingMonitor.init(iface, &hostnames);
 	pm.ping_interval_ns = 0; // disable rate limiting for tests
 
+	// Round-robin: 2 hosts, so 6 update() calls = 3 pings per host
+	pm.update();
+	pm.update();
+	pm.update();
 	pm.update();
 	pm.update();
 	pm.update();

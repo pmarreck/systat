@@ -2,25 +2,29 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize: std.builtin.OptimizeMode = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Prioritize performance, safety, or binary size (default: ReleaseFast)",
+    ) orelse .ReleaseFast;
 
     const test_step = b.step("test", "Run unit tests");
 
     // --- TOML dependency (shared) ---
     const toml_dep = b.dependency("toml", .{});
 
-    // --- Testing backend (for headless TDD) ---
+    // --- Testing backend (for headless TDD, always Debug) ---
     {
         const dvui_dep = b.dependency("dvui", .{
             .target = target,
-            .optimize = optimize,
+            .optimize = .Debug,
             .backend = .testing,
         });
 
         const mod = b.createModule(.{
             .root_source_file = b.path("src/app.zig"),
             .target = target,
-            .optimize = optimize,
+            .optimize = .Debug,
         });
 
         mod.addImport("dvui", dvui_dep.module("dvui_testing"));
