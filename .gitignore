@@ -6,3 +6,4 @@ zig-cache/
 result
 dist/
 zig-pkg/
+.direnv/
