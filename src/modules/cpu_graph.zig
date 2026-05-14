@@ -2,6 +2,13 @@ const std = @import("std");
 const stats = @import("../platform/stats.zig");
 const mod = @import("../module.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const runtime = @import("../runtime.zig");
+
+/// Read a monotonic clock as i128 nanoseconds (0.16 replacement for std.time.nanoTimestamp).
+fn monotonicNs(io: std.Io) i128 {
+	const ts = std.Io.Timestamp.now(io, .awake);
+	return @intCast(ts.toNanoseconds());
+}
 
 /// Number of samples retained — 5 minutes at 1 sample/second.
 pub const HISTORY_SIZE = 300;
@@ -32,7 +39,7 @@ pub const CpuGraph = struct {
 
 	/// Poll the stats interface and append a new sample (rate-limited to 1/sec).
 	pub fn update(self: *CpuGraph) void {
-		const now = std.time.nanoTimestamp();
+		const now = monotonicNs(runtime.io());
 		if (self.last_update_ns != 0 and now - self.last_update_ns < self.update_interval_ns) return;
 		self.last_update_ns = now;
 

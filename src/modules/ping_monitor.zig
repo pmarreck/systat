@@ -4,6 +4,13 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const mod = @import("../module.zig");
 const ModuleInfo = mod.ModuleInfo;
 const Module = mod.Module;
+const runtime = @import("../runtime.zig");
+
+/// Read a monotonic clock as i128 nanoseconds (0.16 replacement for std.time.nanoTimestamp).
+fn monotonicNs(io: std.Io) i128 {
+	const ts = std.Io.Timestamp.now(io, .awake);
+	return @intCast(ts.toNanoseconds());
+}
 
 pub const HISTORY_SIZE = 150; // 5 minutes at 1 ping per 2 seconds
 pub const MAX_HOSTS = 8;
@@ -61,7 +68,7 @@ pub const PingMonitor = struct {
 		if (self.host_count == 0) return;
 
 		// Rate-limit: one host per tick (round-robin)
-		const now = std.time.nanoTimestamp();
+		const now = monotonicNs(runtime.io());
 		if (self.last_ping_ns != 0 and now - self.last_ping_ns < self.ping_interval_ns) return;
 		self.last_ping_ns = now;
 

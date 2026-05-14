@@ -259,11 +259,17 @@ test "Module vtable integration" {
 	mod.update();
 	try testing.expect(hogs.aggregated != null);
 
-	// render() needs DVUI context — test via frame
+	// render() needs DVUI context — test via frame. Wrap in a box so the
+	// expanded child inside moduleRender() has a parent constraint (dvui 0.5
+	// is stricter about layout).
 	const RenderTest = struct {
 		var render_target: ?*CpuHogs = null;
 		fn frame() !dvui.App.Result {
-			if (render_target) |target| target.moduleRender();
+			if (render_target) |target| {
+				var panel = dvui.box(@src(), .{}, .{ .expand = .both });
+				defer panel.deinit();
+				target.moduleRender();
+			}
 			return .ok;
 		}
 	};

@@ -5,3 +5,4 @@ zig-cache/
 .codescan/
 result
 dist/
+zig-pkg/

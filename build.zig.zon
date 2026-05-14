@@ -5,12 +5,12 @@
     .paths = .{""},
     .dependencies = .{
         .dvui = .{
-            .url = "git+https://github.com/david-vanderson/dvui?ref=main#2b6dfe7fd7a10a3d074f087bea4b709ed015f259",
-            .hash = "dvui-0.4.0-dev-AQFJmaQl2wDj-nR5BEX6yrkNF_HPN4JMK2FfhASDB-fD",
+            .url = "git+https://github.com/david-vanderson/dvui?ref=main#43394a06237feb910c2e98537ac486cccd65f415",
+            .hash = "dvui-0.5.0-dev-AQFJmcjZ9QDdKwZhXZYBPlmnWqO6fbBk9CyBVBoyI_XB",
         },
         .toml = .{
-            .url = "git+https://github.com/sam701/zig-toml#cf50bd59c6276fb2b6d34b8d71d35486eecc719c",
-            .hash = "toml-0.3.0-bV14Bd-EAQBKoXhpYft303BtA2vgLNlxntUCIWgRUl46",
+            .url = "git+https://github.com/sam701/zig-toml#32fc8950b37e620d23fa3d94b17f571e6116c924",
+            .hash = "toml-0.3.0-bV14BTaHAQB9XGFQv5lCWvhV7u2iZz1YPZmF4byVFXc6",
         },
     },
 }

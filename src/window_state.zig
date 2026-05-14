@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const runtime = @import("runtime.zig");
 
 pub const WindowState = struct {
 	width: i32,
@@ -15,7 +16,7 @@ const state_filename = "window_state";
 
 /// Get the path to the window state file.
 /// Returns null if the config directory can't be determined.
-fn getStatePath(buf: *[std.fs.max_path_bytes]u8) ?[]const u8 {
+fn getStatePath(buf: *[std.Io.Dir.max_path_bytes]u8) ?[]const u8 {
 	return getStatePathImpl(buf);
 }
 
@@ -25,11 +26,12 @@ fn getStatePathImpl(buf: anytype) ?[]const u8 {
 		// will be implemented when a Windows platform backend exists.
 		return null;
 	}
+	const env = runtime.env();
 	// POSIX: try XDG_CONFIG_HOME, then ~/.config
-	if (std.posix.getenv("XDG_CONFIG_HOME")) |xdg| {
+	if (env.get("XDG_CONFIG_HOME")) |xdg| {
 		return std.fmt.bufPrint(buf, "{s}/systat/{s}", .{ xdg, state_filename }) catch null;
 	}
-	if (std.posix.getenv("HOME")) |home| {
+	if (env.get("HOME")) |home| {
 		return std.fmt.bufPrint(buf, "{s}/.config/systat/{s}", .{ home, state_filename }) catch null;
 	}
 	return null;
@@ -40,20 +42,26 @@ fn ensureDir(path: []const u8) void {
 	const sep: u8 = if (comptime builtin.os.tag == .windows) '\\' else '/';
 	if (std.mem.lastIndexOfScalar(u8, path, sep)) |pos| {
 		const dir_path = path[0..pos];
-		std.fs.cwd().makePath(dir_path) catch {};
+		std.Io.Dir.cwd().createDirPath(runtime.io(), dir_path) catch {};
 	}
 }
 
 /// Load saved window state. Returns null if no saved state exists.
 pub fn load() ?WindowState {
-	var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+	const io = runtime.io();
+	var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 	const path = getStatePath(&path_buf) orelse return null;
 
-	const file = std.fs.cwd().openFile(path, .{}) catch return null;
-	defer file.close();
+	const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return null;
+	defer file.close(io);
 
 	var line_buf: [256]u8 = undefined;
-	const bytes_read = file.readAll(&line_buf) catch return null;
+	const bytes_read = blk: {
+		var reader_buf: [256]u8 = undefined;
+		var reader = file.reader(io, &reader_buf);
+		const n = reader.interface.readSliceShort(&line_buf) catch return null;
+		break :blk n;
+	};
 	const content = line_buf[0..bytes_read];
 
 	return parse(content);
@@ -61,7 +69,8 @@ pub fn load() ?WindowState {
 
 /// Save window state to disk.
 pub fn save(state: WindowState) void {
-	var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+	const io = runtime.io();
+	var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 	const path = getStatePath(&path_buf) orelse return;
 
 	ensureDir(path);
@@ -71,9 +80,9 @@ pub fn save(state: WindowState) void {
 		state.width, state.height, state.x, state.y,
 	}) catch return;
 
-	const file = std.fs.cwd().createFile(path, .{}) catch return;
-	defer file.close();
-	file.writeAll(data) catch {};
+	const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return;
+	defer file.close(io);
+	file.writeStreamingAll(io, data) catch {};
 }
 
 /// Parse "width height x y" from a string.

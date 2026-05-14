@@ -8,6 +8,13 @@ const darwin = @import("platform/darwin.zig");
 const menu = @import("menu.zig");
 const StatusBar = @import("status_bar.zig").StatusBar;
 const window_state = @import("window_state.zig");
+const runtime = @import("runtime.zig");
+
+/// Read a monotonic clock as i128 nanoseconds (0.16 replacement for std.time.nanoTimestamp).
+fn monotonicNs(io: std.Io) i128 {
+    const ts = std.Io.Timestamp.now(io, .awake);
+    return @intCast(ts.toNanoseconds());
+}
 
 // File-scope state — initialized in appInit, freed in appDeinit.
 // DVUI's frameFn signature takes no state parameter, so we persist here.
@@ -15,7 +22,7 @@ var app_state: ?*AppState = null;
 var mock_stats: ?*mock.MockStats = null;
 var darwin_backend: ?*darwin.DarwinBackend = null;
 var status_bar: StatusBar = StatusBar.init();
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa: std.heap.DebugAllocator(.{}) = .init;
 
 // Resize detection — skip expensive updates while window is being resized
 var last_window_size: [2]f32 = .{ 0, 0 };
@@ -48,6 +55,16 @@ pub const std_options: std.Options = .{
 };
 
 pub fn appInit(win: *dvui.Window) !void {
+    // Stash io + environ from dvui's Juicy Main hand-off. Everything in the
+    // app (file_watcher, darwin backend, ping_monitor, etc.) reaches into
+    // `runtime.io()` instead of threading io explicitly — keeps dvui's
+    // frameFn signature (which takes no state param) workable.
+    if (dvui.App.main_init) |mi| {
+        runtime.set(mi.io, mi.environ_map);
+    } else {
+        runtime.setForTests();
+    }
+
     const allocator = gpa.allocator();
 
     // Create platform-appropriate stats backend
@@ -144,7 +161,7 @@ pub fn appFrame() !dvui.App.Result {
     // Use a cooldown so we don't immediately block on updates between
     // rapid size-change events during a drag gesture.
     const win_rect = dvui.currentWindow().rect_pixels;
-    const now_ns = std.time.nanoTimestamp();
+    const now_ns = monotonicNs(runtime.io());
     const size_changed = (last_window_size[0] != 0 and
         (win_rect.w != last_window_size[0] or win_rect.h != last_window_size[1]));
     last_window_size = .{ win_rect.w, win_rect.h };
@@ -260,6 +277,7 @@ pub fn appFrame() !dvui.App.Result {
 }
 
 test "basic frame without state" {
+    runtime.setForTests();
     var t = try dvui.testing.init(.{});
     defer t.deinit();
 
@@ -269,6 +287,7 @@ test "basic frame without state" {
 
 test "full frame with real DarwinBackend (macOS only)" {
     if (comptime @import("builtin").os.tag != .macos) return;
+    runtime.setForTests();
 
     const theme_mod = @import("theme.zig");
     const CpuHogs = @import("modules/cpu_hogs.zig").CpuHogs;
@@ -344,4 +363,5 @@ comptime {
     _ = @import("menu.zig");
     _ = @import("file_watcher.zig");
     _ = @import("window_state.zig");
+    _ = @import("runtime.zig");
 }

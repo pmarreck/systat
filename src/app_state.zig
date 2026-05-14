@@ -13,6 +13,7 @@ const CpuHogs = @import("modules/cpu_hogs.zig").CpuHogs;
 const MemHogs = @import("modules/mem_hogs.zig").MemHogs;
 const CpuGraph = @import("modules/cpu_graph.zig").CpuGraph;
 const PingMonitor = @import("modules/ping_monitor.zig").PingMonitor;
+const runtime = @import("runtime.zig");
 
 pub const MODULE_COUNT = 4;
 
@@ -61,7 +62,7 @@ pub const AppState = struct {
 		if (!self.config_watcher.check()) return;
 
 		// File changed — try to read and parse
-		const source = std.fs.cwd().readFileAlloc(self.allocator, CONFIG_PATH, 64 * 1024) catch |err| {
+		const source = std.Io.Dir.cwd().readFileAlloc(runtime.io(), CONFIG_PATH, self.allocator, .limited(64 * 1024)) catch |err| {
 			self.last_config_status = switch (err) {
 				error.FileNotFound => "Config file removed",
 				else => "Config read error",

@@ -2,6 +2,7 @@
 //! Simple and cross-platform. Can be upgraded to kqueue/inotify later.
 
 const std = @import("std");
+const runtime = @import("runtime.zig");
 
 pub const FileWatcher = struct {
 	path: []const u8,
@@ -26,11 +27,12 @@ pub const FileWatcher = struct {
 	/// Returns true if the file was modified, false otherwise.
 	/// Respects the check interval — returns false if called too soon.
 	pub fn check(self: *FileWatcher) bool {
-		const now = std.time.nanoTimestamp();
+		const io = runtime.io();
+		const now = monotonicNs(io);
 		if (now - self.last_check_ns < self.check_interval_ns) return false;
 		self.last_check_ns = now;
 
-		const stat = std.fs.cwd().statFile(self.path) catch |err| {
+		const stat = std.Io.Dir.cwd().statFile(io, self.path, .{}) catch |err| {
 			switch (err) {
 				error.FileNotFound => {
 					// File doesn't exist (yet or anymore)
@@ -44,7 +46,7 @@ pub const FileWatcher = struct {
 			}
 		};
 
-		const mtime_ns = stat.mtime;
+		const mtime_ns = stat.mtime.toNanoseconds();
 		self.file_exists = true;
 
 		if (mtime_ns != self.last_mtime_ns and self.last_mtime_ns != 0) {
@@ -60,31 +62,41 @@ pub const FileWatcher = struct {
 	}
 
 	fn updateMtime(self: *FileWatcher) void {
-		const stat = std.fs.cwd().statFile(self.path) catch {
+		const io = runtime.io();
+		const stat = std.Io.Dir.cwd().statFile(io, self.path, .{}) catch {
 			return;
 		};
-		self.last_mtime_ns = stat.mtime;
+		self.last_mtime_ns = stat.mtime.toNanoseconds();
 		self.file_exists = true;
 	}
 };
+
+/// Read a monotonic clock as i128 nanoseconds.
+fn monotonicNs(io: std.Io) i128 {
+	const ts = std.Io.Timestamp.now(io, .awake);
+	return @intCast(ts.toNanoseconds());
+}
 
 // ── Tests ────────────────────────────────────────────────────────────
 
 const testing = std.testing;
 
 test "FileWatcher init with nonexistent file" {
+	runtime.setForTests();
 	const watcher = FileWatcher.init("nonexistent_file_for_test.toml", 0);
 	try testing.expect(!watcher.file_exists);
 	try testing.expectEqual(@as(i128, 0), watcher.last_mtime_ns);
 }
 
 test "FileWatcher check returns false for nonexistent file" {
+	runtime.setForTests();
 	var watcher = FileWatcher.init("nonexistent_file_for_test.toml", 0);
 	const changed = watcher.check();
 	try testing.expect(!changed);
 }
 
 test "FileWatcher check_interval_ns computed correctly" {
+	runtime.setForTests();
 	const watcher = FileWatcher.init("test.toml", 2000);
 	try testing.expectEqual(@as(i128, 2_000_000_000), watcher.check_interval_ns);
 }

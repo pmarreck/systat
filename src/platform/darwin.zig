@@ -4,6 +4,13 @@
 
 const std = @import("std");
 const stats = @import("stats.zig");
+const runtime = @import("../runtime.zig");
+
+/// Read a monotonic clock as i128 nanoseconds.
+fn monotonicNs(io: std.Io) i128 {
+	const ts = std.Io.Timestamp.now(io, .awake);
+	return @intCast(ts.toNanoseconds());
+}
 
 pub const DarwinBackend = struct {
 	allocator: std.mem.Allocator,
@@ -65,7 +72,8 @@ pub const DarwinBackend = struct {
 	// ── Refresh logic ────────────────────────────────────────────────
 
 	fn refreshIfNeeded(self: *DarwinBackend) void {
-		const now = std.time.nanoTimestamp();
+		const io = runtime.io();
+		const now = monotonicNs(io);
 		if (now - self.last_refresh_ns < self.refresh_interval_ns) return;
 
 		// Invalidate cached pointers before resetting arena memory.
@@ -79,7 +87,7 @@ pub const DarwinBackend = struct {
 		// If ps+top take >1s, using the pre-command timestamp would cause
 		// the next vtable call (e.g. getCpuSnapshot) to re-trigger refresh,
 		// resetting the arena and invalidating data just returned by getProcessList.
-		self.last_refresh_ns = std.time.nanoTimestamp();
+		self.last_refresh_ns = monotonicNs(io);
 	}
 
 	// ── Process list via ps ──────────────────────────────────────────
@@ -87,10 +95,10 @@ pub const DarwinBackend = struct {
 	fn refreshProcesses(self: *DarwinBackend) void {
 		const arena_alloc = self.arena.allocator();
 
-		const result = std.process.Child.run(.{
-			.allocator = arena_alloc,
+		const result = std.process.run(arena_alloc, runtime.io(), .{
 			.argv = &.{ "/bin/ps", "-eo", "pid,pcpu,rss,comm" },
-			.max_output_bytes = 1024 * 1024,
+			.stdout_limit = .limited(1024 * 1024),
+			.stderr_limit = .limited(1024 * 1024),
 		}) catch return;
 
 		// Parse output into ProcessInfo array
@@ -116,17 +124,17 @@ pub const DarwinBackend = struct {
 		// Parse PID
 		const pid_end = std.mem.indexOfScalar(u8, rest, ' ') orelse return null;
 		const pid = std.fmt.parseInt(u32, rest[0..pid_end], 10) catch return null;
-		rest = std.mem.trimLeft(u8, rest[pid_end..], " ");
+		rest = std.mem.trimStart(u8, rest[pid_end..], " ");
 
 		// Parse CPU%
 		const cpu_end = std.mem.indexOfScalar(u8, rest, ' ') orelse return null;
 		const cpu_percent = std.fmt.parseFloat(f64, rest[0..cpu_end]) catch return null;
-		rest = std.mem.trimLeft(u8, rest[cpu_end..], " ");
+		rest = std.mem.trimStart(u8, rest[cpu_end..], " ");
 
 		// Parse RSS (in KB on macOS)
 		const rss_end = std.mem.indexOfScalar(u8, rest, ' ') orelse return null;
 		const rss_kb = std.fmt.parseInt(u64, rest[0..rss_end], 10) catch return null;
-		rest = std.mem.trimLeft(u8, rest[rss_end..], " ");
+		rest = std.mem.trimStart(u8, rest[rss_end..], " ");
 
 		// Remainder is command path — extract basename
 		const command_path = rest;
@@ -155,10 +163,10 @@ pub const DarwinBackend = struct {
 	fn refreshCpuAndMem(self: *DarwinBackend) void {
 		const arena_alloc = self.arena.allocator();
 
-		const result = std.process.Child.run(.{
-			.allocator = arena_alloc,
+		const result = std.process.run(arena_alloc, runtime.io(), .{
 			.argv = &.{ "/usr/bin/top", "-l", "1", "-n", "0", "-s", "0" },
-			.max_output_bytes = 16 * 1024,
+			.stdout_limit = .limited(16 * 1024),
+			.stderr_limit = .limited(16 * 1024),
 		}) catch return;
 
 		var summary = self.cached_summary;
@@ -429,10 +437,10 @@ pub const DarwinBackend = struct {
 	// ── Static system info ───────────────────────────────────────────
 
 	fn fetchNumCores(self: *DarwinBackend) u16 {
-		const result = std.process.Child.run(.{
-			.allocator = self.allocator,
+		const result = std.process.run(self.allocator, runtime.io(), .{
 			.argv = &.{ "/usr/sbin/sysctl", "-n", "hw.logicalcpu" },
-			.max_output_bytes = 64,
+			.stdout_limit = .limited(64),
+			.stderr_limit = .limited(64),
 		}) catch return 1;
 		defer self.allocator.free(result.stdout);
 		defer self.allocator.free(result.stderr);
@@ -441,10 +449,10 @@ pub const DarwinBackend = struct {
 	}
 
 	fn fetchTotalMem(self: *DarwinBackend) u64 {
-		const result = std.process.Child.run(.{
-			.allocator = self.allocator,
+		const result = std.process.run(self.allocator, runtime.io(), .{
 			.argv = &.{ "/usr/sbin/sysctl", "-n", "hw.memsize" },
-			.max_output_bytes = 64,
+			.stdout_limit = .limited(64),
+			.stderr_limit = .limited(64),
 		}) catch return 0;
 		defer self.allocator.free(result.stdout);
 		defer self.allocator.free(result.stderr);
@@ -472,10 +480,9 @@ pub const DarwinBackend = struct {
 		};
 
 		// Measure wall-clock time around curl
-		const start_ns = std.time.nanoTimestamp();
+		const start_ns = monotonicNs(runtime.io());
 
-		const result = std.process.Child.run(.{
-			.allocator = arena_alloc,
+		const result = std.process.run(arena_alloc, runtime.io(), .{
 			.argv = &.{
 				"/usr/bin/curl",
 				"-L", "-s", "-o", "/dev/null",
@@ -495,7 +502,8 @@ pub const DarwinBackend = struct {
 				"-A", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
 				url,
 			},
-			.max_output_bytes = 4096,
+			.stdout_limit = .limited(4096),
+			.stderr_limit = .limited(4096),
 		}) catch return failedPing(host);
 
 		_ = start_ns;
@@ -505,7 +513,7 @@ pub const DarwinBackend = struct {
 		return .{
 			.host = host,
 			.latency_ms = latency,
-			.timestamp_ns = std.time.nanoTimestamp(),
+			.timestamp_ns = monotonicNs(runtime.io()),
 		};
 	}
 
@@ -513,7 +521,7 @@ pub const DarwinBackend = struct {
 		return .{
 			.host = host,
 			.latency_ms = null,
-			.timestamp_ns = std.time.nanoTimestamp(),
+			.timestamp_ns = monotonicNs(runtime.io()),
 		};
 	}
 
@@ -725,6 +733,7 @@ test "parsePsLine basic" {
 
 test "DarwinBackend process data through aggregateProcesses" {
 	if (comptime builtin.os.tag != .macos) return;
+	runtime.setForTests();
 
 	const data = @import("../data.zig");
 
@@ -749,6 +758,7 @@ test "DarwinBackend process data through aggregateProcesses" {
 
 test "DarwinBackend through CpuHogs update" {
 	if (comptime builtin.os.tag != .macos) return;
+	runtime.setForTests();
 
 	const CpuHogs = @import("../modules/cpu_hogs.zig").CpuHogs;
 
@@ -768,6 +778,7 @@ test "DarwinBackend through CpuHogs update" {
 
 test "DarwinBackend smoke test" {
 	if (comptime builtin.os.tag != .macos) return;
+	runtime.setForTests();
 
 	var backend = DarwinBackend.init(testing.allocator);
 	defer backend.deinit();

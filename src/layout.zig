@@ -37,7 +37,7 @@ pub fn computeLayout(
 	}
 
 	// Step 1: Create sorted indices by priority (ascending = highest priority first)
-	var sorted_indices = std.ArrayListUnmanaged(usize){};
+	var sorted_indices = std.ArrayListUnmanaged(usize).empty;
 	defer sorted_indices.deinit(allocator);
 	try sorted_indices.ensureTotalCapacity(allocator, infos.len);
 	for (0..infos.len) |i| {
@@ -74,7 +74,7 @@ pub fn computeLayout(
 	var col_y: [3]u16 = .{ 0, 0, 0 };
 
 	// Step 5-6: Walk sorted modules, greedily place
-	var placed = std.ArrayListUnmanaged(PlacedModule){};
+	var placed = std.ArrayListUnmanaged(PlacedModule).empty;
 	defer placed.deinit(allocator);
 	try placed.ensureTotalCapacity(allocator, infos.len);
 

@@ -35,7 +35,7 @@
 						system = buildSystem;
 						overlays = [ inputs.zig-overlay.overlays.default ];
 					};
-					zig = pkgs.zigpkgs."0.15.2";
+					zig = pkgs.zigpkgs."0.16.0";
 					isDarwin = pkgs.stdenv.isDarwin;
 
 					zigDeps = pkgs.stdenv.mkDerivation {
@@ -110,7 +110,7 @@
 						inherit system;
 						overlays = [ inputs.zig-overlay.overlays.default ];
 					};
-					zig = pkgs.zigpkgs."0.15.2";
+					zig = pkgs.zigpkgs."0.16.0";
 					isDarwin = pkgs.stdenv.isDarwin;
 
 					zigDeps = pkgs.stdenv.mkDerivation {
@@ -175,7 +175,7 @@
 						inherit system;
 						overlays = [ inputs.zig-overlay.overlays.default ];
 					};
-					zig = pkgs.zigpkgs."0.15.2";
+					zig = pkgs.zigpkgs."0.16.0";
 				in {
 					default = pkgs.mkShell {
 						buildInputs = [

@@ -28,8 +28,8 @@ pub fn aggregateProcesses(
 	var map = std.StringHashMap(usize).init(allocator);
 	defer map.deinit();
 
-	// Collect aggregated entries into a dynamic list (unmanaged in Zig 0.15)
-	var list: std.ArrayList(AggregatedProcess) = .{};
+	// Collect aggregated entries into a dynamic list (unmanaged in Zig 0.15+)
+	var list: std.ArrayList(AggregatedProcess) = .empty;
 	defer list.deinit(allocator);
 
 	for (processes) |proc| {
