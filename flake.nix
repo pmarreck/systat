@@ -27,7 +27,7 @@
 			# Update this hash when build.zig.zon changes:
 			#   nix run nixpkgs#nix-prefetch -- '{ ... }'
 			# or manually: zig build --fetch=all && nix hash path $ZIG_GLOBAL_CACHE_DIR
-			zigDepsHash = "sha256-0aSOc7ObMVVNYEZXc1JYr5n4VJbqBHBaW6pIVj7sGLk=";
+			zigDepsHash = "sha256-TlOwiJSJwYmjKASx/kYfToNBR5v1Npqy9Xt3mb5sfNM=";
 		in {
 			packages = forBuildSystems (buildSystem:
 				let
@@ -54,7 +54,14 @@
 							export ZIG_GLOBAL_CACHE_DIR=$out
 							export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 							export GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-							zig build --fetch=all
+							# Per-target fetch instead of --fetch=all: dvui's lazy deps include
+							# accesskit-c (broken URL), wasmtime windows zips (HttpConnectionClosing),
+							# and xcode-frameworks (hash mismatch upstream) that --fetch=all would
+							# try to grab. Only fetching the deps each target actually needs avoids
+							# those broken transitive paths.
+							for tgt in x86_64-linux-musl aarch64-linux-musl x86_64-windows-gnu aarch64-windows-gnu x86_64-macos aarch64-macos; do
+								zig build --fetch -Dtarget=$tgt
+							done
 						'';
 
 						dontInstall = true;
@@ -129,7 +136,14 @@
 							export ZIG_GLOBAL_CACHE_DIR=$out
 							export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 							export GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-							zig build --fetch=all
+							# Per-target fetch instead of --fetch=all: dvui's lazy deps include
+							# accesskit-c (broken URL), wasmtime windows zips (HttpConnectionClosing),
+							# and xcode-frameworks (hash mismatch upstream) that --fetch=all would
+							# try to grab. Only fetching the deps each target actually needs avoids
+							# those broken transitive paths.
+							for tgt in x86_64-linux-musl aarch64-linux-musl x86_64-windows-gnu aarch64-windows-gnu x86_64-macos aarch64-macos; do
+								zig build --fetch -Dtarget=$tgt
+							done
 						'';
 
 						dontInstall = true;
