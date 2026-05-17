@@ -90,8 +90,14 @@
 								mkdir -p $ZIG_GLOBAL_CACHE_DIR
 								cp -r ${zigDeps}/* $ZIG_GLOBAL_CACHE_DIR/
 								chmod -R u+w $ZIG_GLOBAL_CACHE_DIR
-								${pkgs.lib.optionalString isDarwin "unset NIX_CFLAGS_COMPILE NIX_LDFLAGS"}
-								zig build -Doptimize=ReleaseFast --release=fast ${if cross then "-Dtarget=${zigTarget}" else ""}
+								${pkgs.lib.optionalString (isDarwin && !cross) ''
+								  unset NIX_CFLAGS_COMPILE NIX_LDFLAGS
+								  # dvui's vendored SDL3 needs --sysroot to locate macOS frameworks
+								  # (CoreMedia, CoreVideo, Cocoa, IOKit, UniformTypeIdentifiers, ...).
+								  # apple-sdk exports SDKROOT pointing at MacOSX.sdk.
+								  SYSROOT_ARG="--sysroot $SDKROOT"
+								''}
+								zig build -Doptimize=ReleaseFast --release=fast ''${SYSROOT_ARG:-} ${if cross then "-Dtarget=${zigTarget}" else ""}
 							'';
 
 							installPhase = ''
@@ -169,8 +175,13 @@
 							mkdir -p $ZIG_GLOBAL_CACHE_DIR
 							cp -r ${zigDeps}/* $ZIG_GLOBAL_CACHE_DIR/
 							chmod -R u+w $ZIG_GLOBAL_CACHE_DIR
-							${pkgs.lib.optionalString isDarwin "unset NIX_CFLAGS_COMPILE NIX_LDFLAGS"}
-							timeout 600 zig build test || {
+							${pkgs.lib.optionalString isDarwin ''
+							  unset NIX_CFLAGS_COMPILE NIX_LDFLAGS
+							  # dvui's vendored SDL3 needs --sysroot to locate macOS frameworks.
+							  # apple-sdk exports SDKROOT pointing at MacOSX.sdk.
+							  SYSROOT_ARG="--sysroot $SDKROOT"
+							''}
+							timeout 600 zig build test ''${SYSROOT_ARG:-} || {
 								echo "Tests timed out or failed after 10 minutes"
 								exit 1
 							}

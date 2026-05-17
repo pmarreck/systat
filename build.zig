@@ -64,6 +64,21 @@ pub fn build(b: *std.Build) void {
         // GUI app: use Windows subsystem to suppress console window
         exe.subsystem = .Windows;
 
+        // On macOS, when building inside the Nix sandbox there is no xcrun
+        // to auto-discover the SDK. dvui's vendored SDL3 calls linkFramework()
+        // on its own module (which propagates -framework args to the exe link),
+        // but the framework *search path* does not propagate cross-module.
+        // If --sysroot was passed (e.g. via flake.nix on Darwin), explicitly
+        // wire its System/Library/Frameworks path into the exe so the linker
+        // can resolve CoreMedia, CoreVideo, Cocoa, IOKit, etc.
+        if (target.result.os.tag == .macos) {
+            if (b.sysroot) |sysroot| {
+                mod.addSystemFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
+                mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
+                mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib" }) });
+            }
+        }
+
         const compile_step = b.step("compile", "Compile the app");
         compile_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
         b.getInstallStep().dependOn(compile_step);
